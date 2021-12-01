@@ -5,7 +5,7 @@ use core::fmt;
 
 use digest::Digest;
 use ecdsa::{Signature as BackendSignature, SignatureSize, SigningKey, VerifyingKey};
-use elliptic_curve::{PublicKey as BackendPublicKey, SecretKey as BackendSecretKey};
+use k256::elliptic_curve::{PublicKey as BackendPublicKey, SecretKey as BackendSecretKey};
 use generic_array::GenericArray;
 use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -119,14 +119,14 @@ impl SecretKey {
     }
 
     pub(crate) fn from_scalar(scalar: &CurveScalar) -> Option<Self> {
-        let nz_scalar = SecretBox::new(BackendNonZeroScalar::new(scalar.to_backend_scalar())?);
-        Some(Self::new(nz_scalar.as_secret().into()))
+        let nz_scalar = BackendNonZeroScalar::new(scalar.to_backend_scalar())?;
+        Some(Self::new(BackendSecretKey::<CurveType>::new(nz_scalar)))
     }
 
     /// Returns a reference to the underlying scalar of the secret key.
     pub(crate) fn to_secret_scalar(&self) -> SecretBox<CurveScalar> {
-        let backend_scalar = SecretBox::new(self.0.as_secret().to_secret_scalar());
-        SecretBox::new(CurveScalar::from_backend_scalar(backend_scalar.as_secret()))
+       // let backend_scalar = SecretBox::new(self.0.as_secret().secret_scalar().clone());
+        SecretBox::new(CurveScalar::from_backend_scalar(&*self.0.as_secret().secret_scalar()))
     }
 }
 
@@ -188,7 +188,7 @@ impl Signer {
         let secret_key = self.0.clone();
         // We could use SecretBox here, but SigningKey does not implement Clone.
         // Box is good enough, seeing as how `signing_key` does not leave this method.
-        let signing_key = Box::new(SigningKey::<CurveType>::from(secret_key.0.as_secret()));
+        let signing_key = Box::new(SigningKey::<CurveType>::from(secret_key.0.as_secret().clone()));
         Signature(signing_key.as_ref().sign_digest_with_rng(rng, digest))
     }
 
