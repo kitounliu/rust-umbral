@@ -7,15 +7,17 @@ use core::ops::{Add, Mul, Sub};
 
 use digest::Digest;
 use generic_array::GenericArray;
-use k256::elliptic_curve::ff::PrimeField;
 use k256::elliptic_curve::sec1::{
     CompressedPointSize, EncodedPoint, FromEncodedPoint, ToEncodedPoint,
 };
+use ecdsa::hazmat::FromDigest;
+
 use k256::elliptic_curve::{
-    scalar::NonZeroScalar, AffinePoint, Curve, FromDigest, ProjectiveArithmetic, Scalar,
+    NonZeroScalar, AffinePoint, ProjectiveArithmetic, Scalar, FieldSize
 };
+use k256::elliptic_curve::group::ff::PrimeField;
 use k256::Secp256k1;
-use rand_core::{CryptoRng, RngCore};
+use signature::rand_core::{CryptoRng, RngCore};
 use subtle::CtOption;
 use zeroize::{DefaultIsZeroes, Zeroize};
 
@@ -97,7 +99,7 @@ impl CanBeZeroizedOnDrop for CurveScalar {
 impl RepresentableAsArray for CurveScalar {
     // Currently it's the only size available.
     // A separate scalar size may appear in later versions of `elliptic_curve`.
-    type Size = <CurveType as Curve>::FieldSize;
+    type Size =  FieldSize<CurveType>;
 }
 
 impl SerializableToArray for CurveScalar {

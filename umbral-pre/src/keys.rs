@@ -1,3 +1,6 @@
+
+
+
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -7,13 +10,10 @@ use digest::Digest;
 use ecdsa::{Signature as BackendSignature, SignatureSize, SigningKey, VerifyingKey};
 use k256::elliptic_curve::{PublicKey as BackendPublicKey, SecretKey as BackendSecretKey};
 use generic_array::GenericArray;
-use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use signature::{DigestVerifier, RandomizedDigestSigner, Signature as SignatureTrait};
-use typenum::{Unsigned, U32, U64};
 
-#[cfg(feature = "default-rng")]
-use rand_core::OsRng;
+use typenum::{Unsigned, U32, U64};
 
 use crate::curve::{BackendNonZeroScalar, CurvePoint, CurveScalar, CurveType};
 use crate::dem::kdf;
@@ -24,6 +24,12 @@ use crate::traits::{
     fmt_public, fmt_secret, ConstructionError, DeserializableFromArray, HasTypeName,
     RepresentableAsArray, SerializableToArray, SerializableToSecretArray, SizeMismatchError,
 };
+
+
+use rand_core::{CryptoRng, RngCore};
+
+#[cfg(feature = "default-rng")]
+use rand_core::OsRng;
 
 /// ECDSA signature object.
 #[derive(Clone, Debug, PartialEq)]
@@ -120,13 +126,13 @@ impl SecretKey {
 
     pub(crate) fn from_scalar(scalar: &CurveScalar) -> Option<Self> {
         let nz_scalar = BackendNonZeroScalar::new(scalar.to_backend_scalar())?;
-        Some(Self::new(BackendSecretKey::<CurveType>::new(nz_scalar)))
+        Some(Self::new(BackendSecretKey::<CurveType>::new(nz_scalar.into())))
     }
 
     /// Returns a reference to the underlying scalar of the secret key.
     pub(crate) fn to_secret_scalar(&self) -> SecretBox<CurveScalar> {
        // let backend_scalar = SecretBox::new(self.0.as_secret().secret_scalar().clone());
-        SecretBox::new(CurveScalar::from_backend_scalar(&*self.0.as_secret().secret_scalar()))
+        SecretBox::new(CurveScalar::from_backend_scalar(&*self.0.as_secret().to_secret_scalar()))
     }
 }
 
