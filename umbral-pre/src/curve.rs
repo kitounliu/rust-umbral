@@ -12,7 +12,7 @@ use k256::elliptic_curve::sec1::{
     CompressedPointSize, EncodedPoint, FromEncodedPoint, ToEncodedPoint,
 };
 use k256::elliptic_curve::{
-    scalar::NonZeroScalar, AffinePoint, Curve, FromDigest, ProjectiveArithmetic, Scalar,
+    NonZeroScalar, AffinePoint, Curve, ProjectiveArithmetic, Scalar,
 };
 use k256::Secp256k1;
 use rand_core::{CryptoRng, RngCore};
@@ -24,6 +24,7 @@ use crate::traits::{
     ConstructionError, DeserializableFromArray, HasTypeName, RepresentableAsArray,
     SerializableToArray,
 };
+use ecdsa::hazmat::FromDigest;
 
 pub(crate) type CurveType = Secp256k1;
 
