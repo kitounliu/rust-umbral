@@ -4,7 +4,7 @@ use core::fmt;
 
 use generic_array::sequence::Concat;
 use generic_array::GenericArray;
-use signature::rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use typenum::{op, U32};
 
@@ -488,11 +488,12 @@ mod tests {
 
     use alloc::boxed::Box;
 
+    use rand_core::OsRng;
+
     use super::{KeyFrag, KeyFragBase, KeyFragVerificationError, VerifiedKeyFrag};
     use crate::serde::tests::{check_deserialization, check_serialization};
     use crate::serde::Representation;
     use crate::{DeserializableFromArray, PublicKey, SecretKey, SerializableToArray, Signer};
-    use rand_core::OsRng;
 
     fn prepare_kfrags(
         sign_delegating_key: bool,

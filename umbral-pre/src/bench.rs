@@ -2,7 +2,7 @@
 //! This module re-exports some internals for the purposes of benchmarking.
 //! Should not be used by regular users.
 
-use signature::rand_core::OsRng;
+use rand_core::OsRng;
 
 use crate::capsule::{Capsule, KeySeed, OpenReencryptedError};
 use crate::capsule_frag::{CapsuleFrag, VerifiedCapsuleFrag};

@@ -2,7 +2,7 @@ use core::fmt;
 
 use generic_array::sequence::Concat;
 use generic_array::GenericArray;
-use signature::rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use typenum::op;
 

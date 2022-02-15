@@ -10,23 +10,23 @@ readme = "README.md"
 categories = ["cryptography", "no-std"]
 
 [dependencies]
-k256 = { version = "0.9", default-features = false, features = ["ecdsa", "arithmetic", "zeroize"] }
+k256 = { package = "k256", version = "0.8", default-features = false, features = ["ecdsa", "arithmetic", "zeroize"] }
 sha2 = { version = "0.9", default-features = false }
 chacha20poly1305 = { version = "0.8", features = ["xchacha20poly1305"] }
 hkdf = { version = "0.11", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false }
 base64 = { version = "0.13", default-features = false, features = ["alloc"] }
+getrandom = { version = "0.2", features = ["js"] }
 
 # These packages are among the dependencies of the packages above.
 # Their versions should be updated when the main packages above are updated.
 digest = "0.9"
 generic-array = "0.14"
 aead = { version = "0.4", features = ["heapless"] }
-ecdsa = { version = "0.12.2", features = ["zeroize"] }
-signature = { version = "1.3", default-features = false}
-rand_core = { version = "0.6", default-features = false,features = ["getrandom"]  }
-getrandom = { version = "0.2.4", features = ["js"] }
+ecdsa = { package = "ecdsa", version = "0.11", features = ["zeroize"] }
+signature = { package = "signature", version = "1.3", default-features = false }
+rand_core = { version = "0.6", default-features = false }
 typenum = { version = "1.13", features = ["no_std"] } # typenum is a 2018-edition crate starting from 1.13
 subtle = { version = "2.4", default-features = false }
 zeroize = "1.3"

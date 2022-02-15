@@ -6,7 +6,7 @@ use chacha20poly1305::aead::NewAead;
 use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use generic_array::{ArrayLength, GenericArray};
 use hkdf::Hkdf;
-use signature::rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore};
 use sha2::Sha256;
 use typenum::Unsigned;
 
