@@ -80,6 +80,14 @@ impl Signature {
     pub fn verify(&self, verifying_pk: &PublicKey, message: &[u8]) -> bool {
         verifying_pk.verify_digest(digest_for_signing(message), self)
     }
+
+    /// Verifies signature with auxiliary input
+    pub fn verify_with_aux(&self, verifying_pk: &PublicKey, message: &[u8], aux: &[u8]) -> bool {
+        let mut m = Vec::new();
+        m.extend_from_slice(message);
+        m.extend_from_slice(aux);
+        verifying_pk.verify_digest(digest_for_signing(&m), self)
+    }
 }
 
 impl HasTypeName for Signature {
@@ -171,6 +179,10 @@ fn digest_for_signing(message: &[u8]) -> BackendDigest {
     Hash::new().chain_bytes(message).digest()
 }
 
+pub fn get_digest(message: &[u8]) -> Vec<u8> {
+    digest_for_signing(message).finalize().to_vec()
+}
+
 /// An object used to sign messages.
 /// For security reasons cannot be serialized.
 // `k256::SigningKey` is zeroized on `Drop` as of `k256=0.10`.
@@ -194,6 +206,16 @@ impl Signer {
     #[cfg_attr(docsrs, doc(cfg(feature = "default-rng")))]
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.sign_with_rng(&mut OsRng, message)
+    }
+
+    /// Signs message with auxiliary input
+    #[cfg(feature = "default-rng")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "default-rng")))]
+    pub fn sign_with_aux(&self, message: &[u8], aux: &[u8]) -> Signature {
+        let mut m = Vec::new();
+        m.extend_from_slice(message);
+        m.extend_from_slice(aux);
+        self.sign(&m)
     }
 
     /// Returns the public key that can be used to verify the signatures produced by this signer.

@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+//use alloc::boxed::Box;
 use core::fmt;
 
 use aead::{Aead, AeadCore, Payload};
@@ -11,6 +11,7 @@ use sha2::Sha256;
 use typenum::Unsigned;
 
 use crate::secret_box::{CanBeZeroizedOnDrop, SecretBox};
+use alloc::vec::Vec;
 
 /// Errors that can happen during symmetric encryption.
 #[derive(Debug, PartialEq)]
@@ -98,7 +99,7 @@ impl DEM {
         rng: &mut (impl CryptoRng + RngCore),
         data: &[u8],
         authenticated_data: &[u8],
-    ) -> Result<Box<[u8]>, EncryptionError> {
+    ) -> Result<Vec<u8>, EncryptionError> {
         let mut nonce = GenericArray::<u8, NonceSize>::default();
         rng.fill_bytes(&mut nonce);
         let nonce = XNonce::from_slice(&nonce);
@@ -117,14 +118,14 @@ impl DEM {
         // Somewhat inefficient, but it doesn't seem that you can pass
         // a mutable view of a vector to encrypt_in_place().
         result.extend(enc_data);
-        Ok(result.into_boxed_slice())
+        Ok(result)
     }
 
     pub fn decrypt(
         &self,
         ciphertext: impl AsRef<[u8]>,
         authenticated_data: &[u8],
-    ) -> Result<Box<[u8]>, DecryptionError> {
+    ) -> Result<Vec<u8>, DecryptionError> {
         let nonce_size = <NonceSize as Unsigned>::to_usize();
         let buf_size = ciphertext.as_ref().len();
 
@@ -140,8 +141,7 @@ impl DEM {
         self.cipher
             .as_secret()
             .decrypt(nonce, payload)
-            .map(|pt| pt.into_boxed_slice())
-            .or(Err(DecryptionError::AuthenticationFailed))
+            .map_err(|_| DecryptionError::AuthenticationFailed)
     }
 }
 

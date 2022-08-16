@@ -6,7 +6,7 @@ use core::ops::Sub;
 
 use generic_array::sequence::Split;
 use generic_array::{ArrayLength, GenericArray};
-use typenum::{Diff, Unsigned, U1, U8};
+use typenum::{Diff, Unsigned, U1, U4, U8};
 
 use crate::secret_box::SecretBox;
 
@@ -185,6 +185,23 @@ impl DeserializableFromArray for bool {
                 &format!("Expected 0x0 or 0x1, got 0x{:x?}", bytes_slice[0]),
             )),
         }
+    }
+}
+
+impl RepresentableAsArray for u32 {
+    type Size = U4;
+}
+
+impl SerializableToArray for u32 {
+    fn to_array(&self) -> GenericArray<u8, Self::Size> {
+        self.to_be_bytes().into()
+    }
+}
+
+impl DeserializableFromArray for u32 {
+    fn from_array(arr: &GenericArray<u8, Self::Size>) -> Result<Self, ConstructionError> {
+        let b = arr.as_slice();
+        Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     }
 }
 

@@ -16,15 +16,15 @@ pub fn capsule_from_public_key(delegating_pk: &PublicKey) -> (Capsule, SecretBox
 
 /// Exported `Capsule::open_original()` for benchmark purposes.
 pub fn capsule_open_original(capsule: &Capsule, delegating_sk: &SecretKey) -> SecretBox<KeySeed> {
-    capsule.open_original(delegating_sk)
+    capsule.derive_key(delegating_sk)
 }
 
 /// Exported `Capsule::open_reencrypted()` for benchmark purposes.
-pub fn capsule_open_reencrypted(
+pub fn capsule_derive_key_reencrypted(
     capsule: &Capsule,
-    receiving_sk: &SecretKey,
-    delegating_pk: &PublicKey,
-    cfrags: &[CapsuleFrag],
+    reader_sk: &SecretKey,
+    delegator_pk: &PublicKey,
+    cfrags: &[&CapsuleFrag],
 ) -> Result<SecretBox<KeySeed>, OpenReencryptedError> {
-    capsule.open_reencrypted(receiving_sk, delegating_pk, cfrags)
+    capsule.derive_key_reencrypted(reader_sk, delegator_pk, cfrags)
 }

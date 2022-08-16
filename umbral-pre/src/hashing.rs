@@ -60,10 +60,10 @@ impl ScalarDigest {
         self.chain_bytes(&point.to_array())
     }
 
-    pub fn chain_points(self, points: &[CurvePoint]) -> Self {
+    pub fn chain_points(self, points: &[&CurvePoint]) -> Self {
         let mut digest = self;
-        for point in points {
-            digest = digest.chain_point(point);
+        for point in points.iter() {
+            digest = digest.chain_point(*point);
         }
         digest
     }
@@ -86,26 +86,26 @@ mod tests {
         let bytes: &[u8] = b"foobar";
 
         let s: CurveScalar = ScalarDigest::new_with_dst(b"abc")
-            .chain_points(&[p1, p2])
+            .chain_points(&[&p1, &p2])
             .chain_bytes(bytes)
             .finalize()
             .into();
         let s_same: CurveScalar = ScalarDigest::new_with_dst(b"abc")
-            .chain_points(&[p1, p2])
+            .chain_points(&[&p1, &p2])
             .chain_bytes(bytes)
             .finalize()
             .into();
         assert_eq!(s, s_same);
 
         let s_diff: CurveScalar = ScalarDigest::new_with_dst(b"abc")
-            .chain_points(&[p2, p1])
+            .chain_points(&[&p2, &p1])
             .chain_bytes(bytes)
             .finalize()
             .into();
         assert_ne!(s, s_diff);
 
         let s_diff_tag: CurveScalar = ScalarDigest::new_with_dst(b"def")
-            .chain_points(&[p1, p2])
+            .chain_points(&[&p1, &p2])
             .chain_bytes(bytes)
             .finalize()
             .into();

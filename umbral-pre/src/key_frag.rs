@@ -1,19 +1,22 @@
-use alloc::boxed::Box;
+//use alloc::boxed::Box;
+use alloc::string::String;
 use alloc::vec::Vec;
+
 use core::fmt;
 
 use generic_array::sequence::Concat;
 use generic_array::GenericArray;
 use rand_core::{CryptoRng, RngCore};
-use typenum::{op, U32};
+use typenum::{op, U4};
 
 #[cfg(feature = "serde-support")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::curve::{CurvePoint, CurveScalar, NonZeroCurveScalar};
-use crate::hashing_ds::{hash_to_polynomial_arg, hash_to_shared_secret, kfrag_signature_message};
-use crate::keys::{PublicKey, SecretKey, Signature, Signer};
-use crate::params::Parameters;
+use crate::dem::{DecryptionError, EncryptionError, DEM};
+use crate::hashing_ds::hash_points_to_key;
+use crate::keys::{PublicKey, SecretKey};
+
 use crate::secret_box::SecretBox;
 use crate::traits::{
     fmt_public, ConstructionError, DeserializableFromArray, DeserializationError, HasTypeName,
@@ -22,184 +25,41 @@ use crate::traits::{
 
 #[cfg(feature = "serde-support")]
 use crate::serde::{serde_deserialize, serde_serialize, Representation};
+use crate::SizeMismatchError;
 
-#[allow(clippy::upper_case_acronyms)]
-type KeyFragIDSize = U32;
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct KeyFragID(GenericArray<u8, KeyFragIDSize>);
-
-impl KeyFragID {
-    fn random(rng: &mut impl RngCore) -> Self {
-        let mut bytes = GenericArray::<u8, KeyFragIDSize>::default();
-        rng.fill_bytes(&mut bytes);
-        Self(bytes)
-    }
-}
-
-impl AsRef<[u8]> for KeyFragID {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl RepresentableAsArray for KeyFragID {
-    type Size = KeyFragIDSize;
-}
-
-impl SerializableToArray for KeyFragID {
-    fn to_array(&self) -> GenericArray<u8, Self::Size> {
-        self.0
-    }
-}
-
-impl DeserializableFromArray for KeyFragID {
-    fn from_array(arr: &GenericArray<u8, Self::Size>) -> Result<Self, ConstructionError> {
-        Ok(Self(*arr))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct KeyFragProof {
-    pub(crate) commitment: CurvePoint,
-    signature_for_proxy: Signature,
-    pub(crate) signature_for_receiver: Signature,
-    delegating_key_signed: bool,
-    receiving_key_signed: bool,
-}
-
-type SignatureSize = <Signature as RepresentableAsArray>::Size;
 type ScalarSize = <CurveScalar as RepresentableAsArray>::Size;
 type PointSize = <CurvePoint as RepresentableAsArray>::Size;
-type BoolSize = <bool as RepresentableAsArray>::Size;
-type KeyFragProofSize = op!(PointSize + SignatureSize + SignatureSize + BoolSize + BoolSize);
-
-impl RepresentableAsArray for KeyFragProof {
-    type Size = KeyFragProofSize;
-}
-
-impl SerializableToArray for KeyFragProof {
-    fn to_array(&self) -> GenericArray<u8, Self::Size> {
-        self.commitment
-            .to_array()
-            .concat(self.signature_for_proxy.to_array())
-            .concat(self.signature_for_receiver.to_array())
-            .concat(self.delegating_key_signed.to_array())
-            .concat(self.receiving_key_signed.to_array())
-    }
-}
-
-impl DeserializableFromArray for KeyFragProof {
-    fn from_array(arr: &GenericArray<u8, Self::Size>) -> Result<Self, ConstructionError> {
-        let (commitment, rest) = CurvePoint::take(*arr)?;
-        let (signature_for_proxy, rest) = Signature::take(rest)?;
-        let (signature_for_receiver, rest) = Signature::take(rest)?;
-        let (delegating_key_signed, rest) = bool::take(rest)?;
-        let receiving_key_signed = bool::take_last(rest)?;
-        Ok(Self {
-            commitment,
-            signature_for_proxy,
-            signature_for_receiver,
-            delegating_key_signed,
-            receiving_key_signed,
-        })
-    }
-}
-
-fn none_unless<T>(x: Option<T>, predicate: bool) -> Option<T> {
-    if predicate {
-        x
-    } else {
-        None
-    }
-}
-
-impl KeyFragProof {
-    fn from_base(
-        rng: &mut (impl CryptoRng + RngCore),
-        base: &KeyFragBase<'_>,
-        kfrag_id: &KeyFragID,
-        kfrag_key: &CurveScalar,
-        sign_delegating_key: bool,
-        sign_receiving_key: bool,
-    ) -> Self {
-        let commitment = &base.params.u * kfrag_key;
-
-        let maybe_delegating_pk = Some(&base.delegating_pk);
-        let maybe_receiving_pk = Some(&base.receiving_pk);
-
-        let signature_for_receiver = base.signer.sign_with_rng(
-            rng,
-            kfrag_signature_message(
-                kfrag_id,
-                &commitment,
-                &base.precursor,
-                maybe_delegating_pk,
-                maybe_receiving_pk,
-            )
-            .as_ref(),
-        );
-
-        let signature_for_proxy = base.signer.sign_with_rng(
-            rng,
-            kfrag_signature_message(
-                kfrag_id,
-                &commitment,
-                &base.precursor,
-                none_unless(maybe_delegating_pk, sign_delegating_key),
-                none_unless(maybe_receiving_pk, sign_receiving_key),
-            )
-            .as_ref(),
-        );
-
-        Self {
-            commitment,
-            signature_for_proxy,
-            signature_for_receiver,
-            delegating_key_signed: sign_delegating_key,
-            receiving_key_signed: sign_receiving_key,
-        }
-    }
-}
 
 /// A fragment of the encrypting party's key used to create a [`CapsuleFrag`](`crate::CapsuleFrag`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyFrag {
-    params: Parameters,
-    pub(crate) id: KeyFragID,
+    pub(crate) index: u32,
     pub(crate) key: CurveScalar,
-    pub(crate) precursor: CurvePoint,
-    pub(crate) proof: KeyFragProof,
+    pub(crate) point_u: CurvePoint,
 }
 
 impl RepresentableAsArray for KeyFrag {
-    type Size = op!(ScalarSize + ScalarSize + PointSize + KeyFragProofSize);
+    type Size = op!(U4 + ScalarSize + PointSize);
 }
 
 impl SerializableToArray for KeyFrag {
     fn to_array(&self) -> GenericArray<u8, Self::Size> {
-        self.id
+        self.index
             .to_array()
             .concat(self.key.to_array())
-            .concat(self.precursor.to_array())
-            .concat(self.proof.to_array())
+            .concat(self.point_u.to_array())
     }
 }
 
 impl DeserializableFromArray for KeyFrag {
     fn from_array(arr: &GenericArray<u8, Self::Size>) -> Result<Self, ConstructionError> {
-        let params = Parameters::new();
-        let (id, rest) = KeyFragID::take(*arr)?;
+        let (index, rest) = u32::take(*arr)?;
         let (key, rest) = CurveScalar::take(rest)?;
-        let (precursor, rest) = CurvePoint::take(rest)?;
-        let proof = KeyFragProof::take_last(rest)?;
+        let point_u = CurvePoint::take_last(rest)?;
         Ok(Self {
-            params,
-            id,
+            index,
             key,
-            precursor,
-            proof,
+            point_u,
         })
     }
 }
@@ -238,72 +98,46 @@ impl fmt::Display for KeyFrag {
     }
 }
 
-/// Possible errors that can be returned by [`KeyFrag::verify`].
-#[derive(Debug, PartialEq)]
-pub enum KeyFragVerificationError {
-    /// Inconsistent internal state leading to commitment verification failure.
-    IncorrectCommitment,
-    /// A delegating key was included in the signature when [`KeyFrag`] was created,
-    /// but no delegating key was provided during verification.
-    DelegatingKeyNotProvided,
-    /// A receiving key was included in the signature when [`KeyFrag`] was created,
-    /// but no receiving key was provided during verification.
-    ReceivingKeyNotProvided,
-    /// Inconsistent internal state leading to signature verification failure.
-    IncorrectSignature,
-}
-
-impl fmt::Display for KeyFragVerificationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IncorrectCommitment => write!(f, "Invalid kfrag commitment"),
-            Self::DelegatingKeyNotProvided => write!(f, "A signature of a delegating key was included in this kfrag but the key is not provided"),
-            Self::ReceivingKeyNotProvided => write!(f, "A signature of a receiving key was included in this kfrag, but the key is not provided"),
-            Self::IncorrectSignature => write!(f, "Failed to verify the kfrag signature"),
-        }
-    }
-}
-
 impl KeyFrag {
-    fn from_base(
-        rng: &mut (impl CryptoRng + RngCore),
-        base: &KeyFragBase<'_>,
-        sign_delegating_key: bool,
-        sign_receiving_key: bool,
-    ) -> Self {
-        let kfrag_id = KeyFragID::random(rng);
-
-        // The index of the re-encryption key share (which in Shamir's Secret
-        // Sharing corresponds to x in the tuple (x, f(x)), with f being the
-        // generating polynomial), is used to prevent reconstruction of the
-        // re-encryption key without Bob's intervention
-        let share_index = hash_to_polynomial_arg(
-            &base.precursor,
-            &base.receiving_pk.to_point(),
-            &base.dh_point,
-            &kfrag_id,
-        );
-
+    fn from_base(non_zero_index: u32, base: &KeyFragBase) -> Self {
+        let share_index = NonZeroCurveScalar::from_u32(non_zero_index);
         // The re-encryption key share is the result of evaluating the generating
         // polynomial for the index value
-        let rk = poly_eval(&base.coefficients, &share_index);
-
-        let proof = KeyFragProof::from_base(
-            rng,
-            base,
-            &kfrag_id,
-            &rk,
-            sign_delegating_key,
-            sign_receiving_key,
-        );
+        let key = poly_eval(&base.coefficients, &share_index);
+        let g = CurvePoint::generator();
+        let point_u = &g * &key;
 
         Self {
-            params: base.params,
-            id: kfrag_id,
-            key: rk,
-            precursor: base.precursor,
-            proof,
+            index: non_zero_index,
+            key,
+            point_u,
         }
+    }
+
+    fn encrypt_with_rng(
+        &self,
+        rng: &mut (impl CryptoRng + RngCore),
+        proxy_pk: &PublicKey,
+    ) -> Result<EncryptedKeyFrag, EncryptionError> {
+        let g = CurvePoint::generator();
+        let r = SecretBox::new(NonZeroCurveScalar::random(rng));
+        let point_r = &g * r.as_secret();
+        let pk = proxy_pk.to_point();
+        let pk_r = &pk * r.as_secret();
+        let points = &[&g, &pk, &point_r, &pk_r];
+        let h = hash_points_to_key(points);
+        let key_seed = SecretBox::new(CurveScalar::from(&h).to_array());
+        let dem = DEM::new(&key_seed);
+        let plaintext = self.key.to_array();
+        let authenticated_data = self.point_u.to_array();
+        let point_u = self.point_u.clone();
+        dem.encrypt(rng, plaintext.as_slice(), authenticated_data.as_slice())
+            .map(|cipher| EncryptedKeyFrag {
+                index: self.index,
+                point_r,
+                cipher,
+                point_u,
+            })
     }
 
     /// Verifies the integrity of the key fragment, given the signing key,
@@ -312,48 +146,11 @@ impl KeyFrag {
     /// If [`generate_kfrags()`](`crate::generate_kfrags()`) was called with `true`
     /// for `sign_delegating_key` or `sign_receiving_key`, and the respective key
     /// is not provided, the verification fails.
-    pub fn verify(
-        self,
-        verifying_pk: &PublicKey,
-        maybe_delegating_pk: Option<&PublicKey>,
-        maybe_receiving_pk: Option<&PublicKey>,
-    ) -> Result<VerifiedKeyFrag, (KeyFragVerificationError, Self)> {
-        let u = self.params.u;
-
-        let kfrag_id = self.id;
-        let key = self.key;
-        let commitment = self.proof.commitment;
-        let precursor = self.precursor;
-
-        // We check that the commitment is well-formed
-        if commitment != &u * &key {
-            return Err((KeyFragVerificationError::IncorrectCommitment, self));
-        }
-
-        // A shortcut, perhaps not necessary
-
-        if maybe_delegating_pk.is_none() && self.proof.delegating_key_signed {
-            return Err((KeyFragVerificationError::DelegatingKeyNotProvided, self));
-        }
-
-        if maybe_receiving_pk.is_none() && self.proof.receiving_key_signed {
-            return Err((KeyFragVerificationError::ReceivingKeyNotProvided, self));
-        }
-
-        // Check the signature
-
-        if !self.proof.signature_for_proxy.verify(
-            verifying_pk,
-            kfrag_signature_message(
-                &kfrag_id,
-                &commitment,
-                &precursor,
-                none_unless(maybe_delegating_pk, self.proof.delegating_key_signed),
-                none_unless(maybe_receiving_pk, self.proof.receiving_key_signed),
-            )
-            .as_ref(),
-        ) {
-            return Err((KeyFragVerificationError::IncorrectSignature, self));
+    pub fn verify(self) -> Result<VerifiedKeyFrag, (KeyFragVerificationError, Self)> {
+        let g = CurvePoint::generator();
+        let t = &g * &self.key;
+        if self.point_u != t {
+            return Err((KeyFragVerificationError::VerificationFailed, self));
         }
 
         Ok(VerifiedKeyFrag { kfrag: self })
@@ -365,6 +162,117 @@ impl KeyFrag {
     /// **Warning:** make sure you considered the implications of not enforcing verification.
     pub fn skip_verification(self) -> VerifiedKeyFrag {
         VerifiedKeyFrag { kfrag: self }
+    }
+}
+
+/// A fragment of the encrypting party's key used to create a [`CapsuleFrag`](`crate::CapsuleFrag`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EncryptedKeyFrag {
+    pub(crate) index: u32,
+    pub(crate) cipher: Vec<u8>,
+    pub(crate) point_r: CurvePoint,
+    pub(crate) point_u: CurvePoint,
+}
+
+impl EncryptedKeyFrag {
+    pub fn decrypt(&self, proxy_sk: &SecretKey) -> Result<KeyFrag, DecryptionError> {
+        let g = CurvePoint::generator();
+        let pk = proxy_sk.public_key().to_point();
+        let pk_r = &self.point_r * proxy_sk.to_secret_scalar().as_secret();
+        let points = &[&g, &pk, &self.point_r, &pk_r];
+        let h = hash_points_to_key(points);
+        let key_seed = SecretBox::new(CurveScalar::from(&h).to_array());
+
+        let dem = DEM::new(&key_seed);
+        let authenticated_data = self.point_u.to_array();
+        dem.decrypt(&self.cipher, authenticated_data.as_slice())
+            .map(|plaintext| {
+                let key = CurveScalar::from_bytes(plaintext).unwrap();
+                let point_u = self.point_u.clone();
+                KeyFrag {
+                    index: self.index,
+                    key,
+                    point_u,
+                }
+            })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let size = self.cipher.len() as u32;
+        assert_eq!(size as usize, self.cipher.len());
+
+        let mut result = Vec::<u8>::new();
+        result.extend_from_slice(&self.index.to_be_bytes());
+        result.extend_from_slice(size.to_be_bytes().as_slice());
+        result.extend_from_slice(self.cipher.as_ref());
+        result.extend_from_slice(&self.point_r.to_array().as_slice());
+        result.extend_from_slice(&self.point_u.to_array().as_slice());
+
+        result
+    }
+
+    pub fn from_bytes(data: impl AsRef<[u8]>) -> Result<Self, DeserializationError> {
+        let d = data.as_ref();
+        let index = u32::from_be_bytes(d[0..4].try_into().unwrap());
+        let length = u32::from_be_bytes(d[4..8].try_into().unwrap()) as usize;
+        let cipher = d[8..length + 8].to_vec();
+
+        let psize = CurvePoint::serialized_size();
+        let mut offset = length + 8;
+        let mut end = offset + psize;
+        let point_r = CurvePoint::from_bytes(&d[offset..end])?;
+        offset = end;
+        end = offset + psize;
+        let point_u = CurvePoint::from_bytes(&d[offset..end])?;
+
+        if end != d.len() {
+            return Err(DeserializationError::SizeMismatch(SizeMismatchError::new(
+                d.len(),
+                end + 1,
+            )));
+        }
+
+        Ok(EncryptedKeyFrag {
+            index,
+            cipher,
+            point_r,
+            point_u,
+        })
+    }
+}
+
+impl HasTypeName for EncryptedKeyFrag {
+    fn type_name() -> &'static str {
+        "EncryptedKeyFrag"
+    }
+}
+
+impl fmt::Display for EncryptedKeyFrag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.to_bytes();
+        let mut hex_repr = [b'*'; 16]; // exactly 16 bytes long, to fit the encode() result
+        hex::encode_to_slice(&bytes[0..8], &mut hex_repr).map_err(|_| fmt::Error)?;
+        write!(
+            f,
+            "{}:{}",
+            Self::type_name(),
+            String::from_utf8_lossy(&hex_repr)
+        )
+    }
+}
+
+/// Possible errors that can be returned by [`KeyFrag::verify`].
+#[derive(Debug, PartialEq)]
+pub enum KeyFragVerificationError {
+    /// Inconsistent internal state leading to commitment verification failure.
+    VerificationFailed,
+}
+
+impl fmt::Display for KeyFragVerificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::VerificationFailed => write!(f, "Invalid key or point_u"),
+        }
     }
 }
 
@@ -400,15 +308,19 @@ impl fmt::Display for VerifiedKeyFrag {
 }
 
 impl VerifiedKeyFrag {
-    pub(crate) fn from_base(
-        rng: &mut (impl CryptoRng + RngCore),
-        base: &KeyFragBase<'_>,
-        sign_delegating_key: bool,
-        sign_receiving_key: bool,
-    ) -> Self {
+    pub(crate) fn from_base(non_zero_index: u32, base: &KeyFragBase) -> Self {
         Self {
-            kfrag: KeyFrag::from_base(rng, base, sign_delegating_key, sign_receiving_key),
+            //   kfrag: KeyFrag::from_base(rng, index, base, sign_delegating_key, sign_receiving_key),
+            kfrag: KeyFrag::from_base(non_zero_index, base),
         }
+    }
+
+    pub(crate) fn encrypt_with_rng(
+        self,
+        rng: &mut (impl CryptoRng + RngCore),
+        proxy_pk: &PublicKey,
+    ) -> Result<EncryptedKeyFrag, EncryptionError> {
+        self.unverify().encrypt_with_rng(rng, proxy_pk)
     }
 
     /// Restores a verified keyfrag directly from serialized bytes,
@@ -429,60 +341,35 @@ impl VerifiedKeyFrag {
     }
 }
 
-pub(crate) struct KeyFragBase<'a> {
-    signer: &'a Signer,
-    precursor: CurvePoint,
-    dh_point: CurvePoint,
-    params: Parameters,
-    delegating_pk: PublicKey,
-    receiving_pk: PublicKey,
-    coefficients: Box<[SecretBox<NonZeroCurveScalar>]>,
+pub(crate) struct KeyFragBase {
+    coefficients: Vec<SecretBox<NonZeroCurveScalar>>,
 }
 
-impl<'a> KeyFragBase<'a> {
-    pub fn new(
+impl KeyFragBase {
+    pub(crate) fn new(
         rng: &mut (impl CryptoRng + RngCore),
-        delegating_sk: &SecretKey,
-        receiving_pk: &PublicKey,
-        signer: &'a Signer,
-        threshold: usize,
+        delegator_sk: &SecretKey,
+        threshold: u32,
     ) -> Self {
-        let g = CurvePoint::generator();
-        let params = Parameters::new();
-
-        let delegating_pk = delegating_sk.public_key();
-
-        let receiving_pk_point = receiving_pk.to_point();
-
-        // The precursor point is used as an ephemeral public key in a DH key exchange,
-        // and the resulting shared secret 'dh_point' is used to derive other secret values
-        let private_precursor = SecretBox::new(NonZeroCurveScalar::random(rng));
-        let precursor = &g * private_precursor.as_secret();
-
-        let dh_point = &receiving_pk_point * private_precursor.as_secret();
-
-        // Secret value 'd' allows to make Umbral non-interactive
-        let d = hash_to_shared_secret(&precursor, &receiving_pk_point, &dh_point);
-
         // Coefficients of the generating polynomial
-        let coefficient0 =
-            SecretBox::new(delegating_sk.to_secret_scalar().as_secret() * &(d.invert()));
+        let coefficient0 = delegator_sk.to_secret_scalar();
 
-        let mut coefficients = Vec::<SecretBox<NonZeroCurveScalar>>::with_capacity(threshold);
+        let mut coefficients =
+            Vec::<SecretBox<NonZeroCurveScalar>>::with_capacity(threshold as usize);
         coefficients.push(coefficient0);
-        for _i in 1..threshold {
+        for _i in 1..threshold as usize {
             coefficients.push(SecretBox::new(NonZeroCurveScalar::random(rng)));
         }
 
-        Self {
-            signer,
-            precursor,
-            dh_point,
-            params,
-            delegating_pk,
-            receiving_pk: *receiving_pk,
-            coefficients: coefficients.into_boxed_slice(),
-        }
+        Self { coefficients }
+    }
+
+    pub(crate) fn get_public_coeffs(&self) -> Vec<CurvePoint> {
+        let g = CurvePoint::generator();
+        self.coefficients
+            .iter()
+            .map(|a| &g * a.as_secret())
+            .collect()
     }
 }
 
@@ -502,102 +389,68 @@ fn poly_eval(coeffs: &[SecretBox<NonZeroCurveScalar>], x: &NonZeroCurveScalar) -
 #[cfg(test)]
 mod tests {
 
-    use alloc::boxed::Box;
+    //use alloc::boxed::Box;
 
     use rand_core::OsRng;
 
-    use super::{KeyFrag, KeyFragBase, KeyFragVerificationError, VerifiedKeyFrag};
+    use super::{KeyFrag, KeyFragBase};
 
-    use crate::{DeserializableFromArray, PublicKey, SecretKey, SerializableToArray, Signer};
+    use crate::{DeserializableFromArray, PublicKey, SecretKey, SerializableToArray};
 
     #[cfg(feature = "serde-support")]
     use crate::serde::tests::{check_deserialization, check_serialization};
 
+    use crate::key_frag::EncryptedKeyFrag;
     #[cfg(feature = "serde-support")]
     use crate::serde::Representation;
+    use alloc::{vec, vec::Vec};
 
-    fn prepare_kfrags(
-        sign_delegating_key: bool,
-        sign_receiving_key: bool,
-    ) -> (PublicKey, PublicKey, PublicKey, Box<[VerifiedKeyFrag]>) {
-        let delegating_sk = SecretKey::random();
-        let delegating_pk = delegating_sk.public_key();
+    fn prepare_kfrags() -> (PublicKey, Vec<KeyFrag>) {
+        let delegator_sk = SecretKey::random();
+        let delegator_pk = delegator_sk.public_key();
 
-        let signer = Signer::new(SecretKey::random());
-        let verifying_pk = signer.verifying_key();
-
-        let receiving_sk = SecretKey::random();
-        let receiving_pk = receiving_sk.public_key();
-
-        let base = KeyFragBase::new(&mut OsRng, &delegating_sk, &receiving_pk, &signer, 2);
-        let vkfrags = [
-            VerifiedKeyFrag::from_base(&mut OsRng, &base, sign_delegating_key, sign_receiving_key),
-            VerifiedKeyFrag::from_base(&mut OsRng, &base, sign_delegating_key, sign_receiving_key),
-            VerifiedKeyFrag::from_base(&mut OsRng, &base, sign_delegating_key, sign_receiving_key),
+        let base = KeyFragBase::new(&mut OsRng, &delegator_sk, 2);
+        let kfrags = vec![
+            KeyFrag::from_base(1, &base),
+            KeyFrag::from_base(2, &base),
+            KeyFrag::from_base(3, &base),
         ];
 
-        (delegating_pk, receiving_pk, verifying_pk, Box::new(vkfrags))
+        (delegator_pk, kfrags)
     }
 
     #[test]
     fn test_verify() {
-        for sign_dk in [false, true].iter().copied() {
-            for sign_rk in [false, true].iter().copied() {
-                let (delegating_pk, receiving_pk, verifying_pk, vkfrags) =
-                    prepare_kfrags(sign_dk, sign_rk);
+        let (_delegator_pk, kfrags) = prepare_kfrags();
+        let kfrag_arr = kfrags[0].to_array();
+        let kfrag = KeyFrag::from_array(&kfrag_arr).unwrap();
 
-                let kfrag_arr = vkfrags[0].to_array();
-                let kfrag = KeyFrag::from_array(&kfrag_arr).unwrap();
+        // Check that the kfrag serializes to the same thing as the verified kfrag
+        assert_eq!(kfrag.to_array(), kfrag_arr);
+        kfrag.verify().unwrap();
+    }
 
-                // Check that the kfrag serializes to the same thing as the verified kfrag
-                assert_eq!(kfrag.to_array(), kfrag_arr);
+    #[test]
+    fn test_encryption() {
+        let (_delegator_pk, kfrags) = prepare_kfrags();
+        let proxy_sk = SecretKey::random();
+        let proxy_pk = proxy_sk.public_key();
+        let encrypted_kfrag: EncryptedKeyFrag =
+            kfrags[0].encrypt_with_rng(&mut OsRng, &proxy_pk).unwrap();
+        let dec_kfrag = encrypted_kfrag.decrypt(&proxy_sk).unwrap();
+        assert_eq!(dec_kfrag.to_array(), kfrags[0].to_array());
 
-                for supply_dk in [false, true].iter().copied() {
-                    for supply_rk in [false, true].iter().copied() {
-                        let maybe_dk = if supply_dk {
-                            Some(&delegating_pk)
-                        } else {
-                            None
-                        };
-                        let maybe_rk = if supply_rk { Some(&receiving_pk) } else { None };
-                        let res = kfrag.clone().verify(&verifying_pk, maybe_dk, maybe_rk);
-
-                        let sufficient_dk = !sign_dk || (supply_dk == sign_dk);
-                        let sufficient_rk = !sign_rk || (supply_rk == sign_rk);
-
-                        if sufficient_dk && sufficient_rk {
-                            assert!(res.is_ok());
-                            assert_eq!(res.unwrap().kfrag, kfrag);
-                        } else if !sufficient_dk {
-                            assert_eq!(
-                                res,
-                                Err((
-                                    KeyFragVerificationError::DelegatingKeyNotProvided,
-                                    kfrag.clone()
-                                ))
-                            );
-                        } else if !sufficient_rk {
-                            assert_eq!(
-                                res,
-                                Err((
-                                    KeyFragVerificationError::ReceivingKeyNotProvided,
-                                    kfrag.clone()
-                                ))
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        let b = encrypted_kfrag.to_bytes();
+        let e = EncryptedKeyFrag::from_bytes(b).unwrap();
+        assert_eq!(e, encrypted_kfrag)
     }
 
     #[cfg(feature = "serde-support")]
     #[test]
     fn test_serde_serialization() {
-        let (_delegating_pk, _receiving_pk, _verifying_pk, verified_kfrags) =
-            prepare_kfrags(true, true);
+        let (_delegating_pk, kfrags) = prepare_kfrags();
 
-        let vkfrag = verified_kfrags[0].clone();
+        let vkfrag = kfrags[0].clone();
         let kfrag = KeyFrag::from_array(&vkfrag.to_array()).unwrap();
 
         check_serialization(&kfrag, Representation::Base64);
