@@ -70,7 +70,10 @@ class Signer:
     def __init__(secret_key: SecretKey):
         ...
 
-    def sign(message: bytes) -> Signature:
+    def sign(self, message: bytes) -> Signature:
+        ...
+
+    def sign_with_aux(self, message: bytes, aux: bytes) _> Signature:
         ...
 
     def verifying_key() -> PublicKey:
@@ -79,7 +82,10 @@ class Signer:
 
 class Signature:
 
-    def verify(verifying_pk: PublicKey, message: bytes) -> bool:
+    def verify(self, verifying_pk: PublicKey, message: bytes) -> bool:
+        ...
+
+    def verify_with_aux(self, verifying_pk: PublicKey, message: bytes, aux: bytes) -> bool:
         ...
 
     @staticmethod
@@ -90,8 +96,18 @@ class Signature:
     def serialized_size() -> int:
         ...
 
+class Delegation:
+
+    def verify_public(self, threshold: int, num_shares: int):
+        ...
+
+    def verify_public_with_index(self, threshold: int, num_shares: int, index: int):
+        ...
 
 class Capsule:
+
+    def verify(self) -> bool:
+        ...
 
     @staticmethod
     def serialized_size() -> int:
@@ -102,17 +118,16 @@ def encrypt(delegating_pk: PublicKey, plaintext: bytes) -> Tuple[Capsule, bytes]
     ...
 
 
-def decrypt_original(delegating_sk: SecretKey, capsule: Capsule, ciphertext: bytes) -> bytes:
+def decrypt(delegating_sk: SecretKey, capsule: Capsule, ciphertext: bytes) -> bytes:
     ...
 
+def get_digest(message: bytes) -> bytes:
+    ...
 
 class KeyFrag:
 
     def verify(
             self,
-            verifying_pk: PublicKey,
-            delegating_pk: Optional[PublicKey],
-            receiving_pk: Optional[PublicKey],
             ) -> VerifiedKeyFrag:
         ...
 
@@ -128,6 +143,24 @@ class KeyFrag:
         ...
 
 
+class EncryptedKeyFrag:
+
+    def decrypt(
+            self,
+            proxy_sk: SecretKey,
+    ) -> KeyFrag:
+        ...
+
+    @staticmethod
+    def to_bytes(self) -> bytes:
+        ...
+
+    @staticmethod
+    def from_bytes(data: bytes) -> EncryptedKeyFrag:
+        ...
+
+
+
 class VerifiedKeyFrag:
 
     def from_verified_bytes(data: bytes) -> VerifiedKeyFrag:
@@ -141,15 +174,12 @@ class VerifiedKeyFrag:
         ...
 
 
-def generate_kfrags(
-        delegating_sk: SecretKey,
-        receiving_pk: PublicKey,
-        signer: SecretKey,
+def delegate(
+        delegator_sk: SecretKey,
         threshold: int,
-        shares: int,
-        sign_delegating_key: bool,
-        sign_receiving_key: bool,
-        ) -> List[VerifiedKeyFrag]:
+        num_shares: int,
+        proxy_pks: Sequence[PublicKey],
+        ) -> Delegation:
     ...
 
 
@@ -158,9 +188,8 @@ class CapsuleFrag:
     def verify(
             self,
             capsule: Capsule,
-            verifying_pk: PublicKey,
-            delegating_pk: PublicKey,
-            receiving_pk: PublicKey,
+            encrypted_kfrag: EncryptedKeyFrag,
+            reader_pk: PublicKey,
             ) -> VerifiedCapsuleFrag:
         ...
 
@@ -189,15 +218,15 @@ class VerifiedCapsuleFrag:
         ...
 
 
-def reencrypt(capsule: Capsule, kfrag: VerifiedKeyFrag) -> VerifiedCapsuleFrag:
+def reencrypt(reader_pk: PublicKey, capsule: Capsule, vkfrag: VerifiedKeyFrag) -> CapsuleFrag:
     ...
 
 
 def decrypt_reencrypted(
-        receiving_sk: SecretKey,
-        delegating_pk: PublicKey,
+        reader_sk: SecretKey,
+        delegator_pk: PublicKey,
         capsule: Capsule,
-        cfrags: Sequence[VerifiedCapsuleFrag],
+        verified_cfrags: Sequence[VerifiedCapsuleFrag],
         ciphertext: bytes,
         ) -> Optional[bytes]:
     ...

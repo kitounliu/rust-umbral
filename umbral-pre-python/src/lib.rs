@@ -13,12 +13,15 @@ fn _umbral(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Capsule>()?;
     m.add_class::<KeyFrag>()?;
     m.add_class::<VerifiedKeyFrag>()?;
+    m.add_class::<EncryptedKeyFrag>()?;
+    m.add_class::<Delegation>()?;
     m.add_class::<CapsuleFrag>()?;
     m.add_class::<VerifiedCapsuleFrag>()?;
     m.add("VerificationError", py.get_type::<VerificationError>())?;
     register_encrypt(m)?;
-    register_decrypt_original(m)?;
-    register_generate_kfrags(m)?;
+    register_decrypt(m)?;
+    register_get_digest(m)?;
+    register_delegate(m)?;
     register_reencrypt(m)?;
     register_decrypt_reencrypted(m)?;
     Ok(())
