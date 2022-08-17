@@ -44,6 +44,9 @@
 //! let plaintext = b"peace at dawn";
 //! let (capsule, ciphertext) = encrypt(&alice_pk, plaintext).unwrap();
 //!
+//! // Verify capsule
+//! assert!(capsule.verify());
+//!
 //! // Since data was encrypted with Alice's public key, Alice can open the capsule
 //! // and decrypt the ciphertext with her private key.
 //!
@@ -63,7 +66,7 @@
 //! let delegation_back = Delegation::from_bytes(delegation.to_bytes()).unwrap();
 //!
 //! // Everyone can verify public parameters in delegation
-//! delegation_back.verify_public().unwrap();
+//! delegation_back.verify_public(threshold, num_shares).unwrap();
 //!
 //! // proxy decrypts encrypted_kfrag to obtain kfrag and verify kfrag to obtain verified_kfrag
 //! let verified_kfrags: Vec<_> = delegation_back.encrypted_kfrags.iter().zip(proxy_sks.iter())

@@ -421,6 +421,10 @@ impl FromBackend<umbral_pre::Capsule> for Capsule {
 
 #[pymethods]
 impl Capsule {
+    pub fn verify(&self) -> bool {
+        self.backend.verify()
+    }
+
     #[staticmethod]
     pub fn from_bytes(data: &[u8]) -> PyResult<Self> {
         from_bytes(data)
@@ -479,6 +483,12 @@ pub fn decrypt(
     umbral_pre::decrypt(&delegator_sk.backend, &capsule.backend, ciphertext)
         .map(|plaintext| PyBytes::new(py, &plaintext).into())
         .map_err(|err| PyValueError::new_err(format!("{}", err)))
+}
+
+#[pyfunction]
+pub fn get_digest(py: Python<'_>, message: &[u8]) -> PyObject {
+    let digest = umbral_pre::get_digest(message);
+    PyBytes::new(py, &digest).into()
 }
 
 #[pyclass(module = "umbral")]
@@ -675,18 +685,34 @@ impl FromBackend<umbral_pre::Delegation> for Delegation {
 
 #[pymethods]
 impl Delegation {
-    pub fn verify_public(&self) -> PyResult<()> {
+    pub fn verify_public(&self, threshold: usize, num_shares: usize) -> PyResult<()> {
         self.backend
             .clone()
-            .verify_public()
+            .verify_public(threshold, num_shares)
             .map_err(|err| VerificationError::new_err(format!("{}", err)))
     }
 
-    pub fn verify_public_with_index(&self, i: usize) -> PyResult<()> {
+    pub fn verify_public_with_index(
+        &self,
+        threshold: usize,
+        num_shares: usize,
+        i: usize,
+    ) -> PyResult<()> {
         self.backend
             .clone()
-            .verify_public_with_index(i)
+            .verify_public_with_index(threshold, num_shares, i)
             .map_err(|err| VerificationError::new_err(format!("{}", err)))
+    }
+
+    pub fn get_encrypted_kfrags(&self) -> PyResult<Vec<EncryptedKeyFrag>> {
+        let eks: Vec<_> = self
+            .backend
+            .encrypted_kfrags
+            .iter()
+            .cloned()
+            .map(|ek| EncryptedKeyFrag { backend: ek })
+            .collect();
+        Ok(eks)
     }
 
     #[staticmethod]
@@ -722,8 +748,8 @@ impl PyObjectProtocol for Delegation {
 #[pyfunction]
 pub fn delegate(
     delegator_sk: &SecretKey,
-    threshold: u32,
-    num_shares: u32,
+    threshold: usize,
+    num_shares: usize,
     proxy_pks: Vec<PublicKey>,
 ) -> PyResult<Delegation> {
     let proxy_pks_backend: Vec<_> = proxy_pks.iter().map(|pk| &pk.backend).collect();
@@ -916,6 +942,10 @@ pub fn register_encrypt(m: &PyModule) -> PyResult<()> {
 
 pub fn register_decrypt(m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(decrypt, m)?)
+}
+
+pub fn register_get_digest(m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(get_digest, m)?)
 }
 
 pub fn register_delegate(m: &PyModule) -> PyResult<()> {

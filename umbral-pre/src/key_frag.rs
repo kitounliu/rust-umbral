@@ -349,7 +349,7 @@ impl KeyFragBase {
     pub(crate) fn new(
         rng: &mut (impl CryptoRng + RngCore),
         delegator_sk: &SecretKey,
-        threshold: u32,
+        threshold: usize,
     ) -> Self {
         // Coefficients of the generating polynomial
         let coefficient0 = delegator_sk.to_secret_scalar();
@@ -357,7 +357,7 @@ impl KeyFragBase {
         let mut coefficients =
             Vec::<SecretBox<NonZeroCurveScalar>>::with_capacity(threshold as usize);
         coefficients.push(coefficient0);
-        for _i in 1..threshold as usize {
+        for _i in 1..threshold {
             coefficients.push(SecretBox::new(NonZeroCurveScalar::random(rng)));
         }
 

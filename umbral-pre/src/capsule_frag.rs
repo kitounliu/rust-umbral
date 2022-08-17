@@ -373,7 +373,7 @@ mod tests {
         let proxy_pks_ref: Vec<_> = proxy_pks.iter().map(|pk| pk).collect();
 
         let delegation = delegate(&delegator_sk, 2, 3, &proxy_pks_ref).unwrap();
-        delegation.verify_public().unwrap();
+        delegation.verify_public(2, 3).unwrap();
 
         let vkfrags: Vec<_> = delegation
             .encrypted_kfrags

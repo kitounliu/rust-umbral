@@ -22,6 +22,7 @@ use crate::curve::{CurvePoint, NonZeroCurveScalar};
 //use crate::{DeserializableFromArray, DeserializableFromBytes, DeserializationError, RepresentableAsArray, SizeMismatchError, HasTypeName};
 //use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::convert::TryInto;
 //use wasm_bindgen::__rt::std::io::Read;
 
 /// Errors that can happen when decrypting a reencrypted ciphertext.
@@ -69,39 +70,41 @@ impl fmt::Display for DelegationError {
 /// Encapsulated symmetric key used to encrypt the plaintext.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Delegation {
-    pub threshold: u32,
-    pub num_shares: u32,
     pub pub_coeffs: Vec<CurvePoint>,
     pub encrypted_kfrags: Vec<EncryptedKeyFrag>,
 }
 
 impl Delegation {
-    pub fn verify_public(&self) -> Result<(), DelegationError> {
-        if self.threshold == 0 || self.num_shares == 0 {
+    pub fn verify_public(
+        &self,
+        threshold: usize,
+        num_shares: usize,
+    ) -> Result<(), DelegationError> {
+        if threshold == 0 || num_shares == 0 {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} and number of shares {} cannot be zero",
-                self.threshold, self.num_shares
+                threshold, num_shares
             )));
         }
 
-        if self.threshold > self.num_shares {
+        if threshold > num_shares {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} cannot be greater than total number of shares {}",
-                self.threshold, self.num_shares
+                threshold, num_shares
             )));
         }
 
-        if self.threshold as usize != self.pub_coeffs.len() {
+        if threshold != self.pub_coeffs.len() {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} does not match the length of public coefficients {}",
-                self.threshold,
+                threshold,
                 self.pub_coeffs.len()
             )));
         }
 
-        if self.num_shares as usize != self.encrypted_kfrags.len() {
+        if num_shares != self.encrypted_kfrags.len() {
             return Err(DelegationError::InvalidSize(
-                format! {"Number {} of shares does not match the length of encrypted kfrags {}", self.num_shares, self.encrypted_kfrags.len()},
+                format! {"Number {} of shares does not match the length of encrypted kfrags {}", num_shares, self.encrypted_kfrags.len()},
             ));
         }
 
@@ -128,32 +131,37 @@ impl Delegation {
     }
 
     // verify the i-th encrypted_kfrag
-    pub fn verify_public_with_index(&self, i: usize) -> Result<(), DelegationError> {
-        if self.threshold == 0 || self.num_shares == 0 {
+    pub fn verify_public_with_index(
+        &self,
+        threshold: usize,
+        num_shares: usize,
+        i: usize,
+    ) -> Result<(), DelegationError> {
+        if threshold == 0 || num_shares == 0 {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} and number of shares {} cannot be zero",
-                self.threshold, self.num_shares
+                threshold, num_shares
             )));
         }
 
-        if self.threshold > self.num_shares {
+        if threshold > num_shares {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} cannot be greater than total number of shares {}",
-                self.threshold, self.num_shares
+                threshold, num_shares
             )));
         }
 
-        if self.threshold as usize != self.pub_coeffs.len() {
+        if threshold != self.pub_coeffs.len() {
             return Err(DelegationError::InvalidSize(format!(
                 "Threshold {} does not match the length of public coefficients {}",
-                self.threshold,
+                threshold,
                 self.pub_coeffs.len()
             )));
         }
 
-        if self.num_shares as usize != self.encrypted_kfrags.len() {
+        if num_shares != self.encrypted_kfrags.len() {
             return Err(DelegationError::InvalidSize(
-                format! {"Number {} of shares does not match the length {} of encrypted kfrags", self.num_shares, self.encrypted_kfrags.len()},
+                format! {"Number {} of shares does not match the length {} of encrypted kfrags", num_shares, self.encrypted_kfrags.len()},
             ));
         }
 
@@ -178,12 +186,12 @@ impl Delegation {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        assert_eq!(self.threshold as usize, self.pub_coeffs.len());
-        assert_eq!(self.num_shares as usize, self.encrypted_kfrags.len());
+        let threshold: u32 = self.pub_coeffs.len().try_into().unwrap();
+        let num_shares: u32 = self.encrypted_kfrags.len().try_into().unwrap();
 
         let mut result = Vec::<u8>::new();
-        result.extend_from_slice(&self.threshold.to_be_bytes());
-        result.extend_from_slice(&self.num_shares.to_be_bytes());
+        result.extend_from_slice(&threshold.to_be_bytes());
+        result.extend_from_slice(&num_shares.to_be_bytes());
 
         for p in self.pub_coeffs.iter() {
             result.extend_from_slice(p.to_array().as_slice());
@@ -231,8 +239,6 @@ impl Delegation {
         }
 
         Ok(Self {
-            threshold,
-            num_shares,
             pub_coeffs,
             encrypted_kfrags,
         })
@@ -314,13 +320,13 @@ pub fn decrypt(
 pub fn delegate_with_rng(
     rng: &mut (impl CryptoRng + RngCore),
     delegator_sk: &SecretKey,
-    threshold: u32,
-    num_shares: u32,
+    threshold: usize,
+    num_shares: usize,
     proxy_pks: &[&PublicKey],
 ) -> Result<Delegation, DelegationError> {
     let base = KeyFragBase::new(rng, delegator_sk, threshold);
     let pub_coeffs = base.get_public_coeffs();
-    if num_shares as usize != proxy_pks.len() {
+    if num_shares != proxy_pks.len() {
         return Err(DelegationError::InvalidSize(format!(
             "The number {} of shares does not match the number {} of proxy public keys",
             num_shares,
@@ -343,8 +349,6 @@ pub fn delegate_with_rng(
     }
 
     Ok(Delegation {
-        threshold,
-        num_shares,
         pub_coeffs,
         encrypted_kfrags,
     })
@@ -356,8 +360,8 @@ pub fn delegate_with_rng(
 #[allow(clippy::too_many_arguments)]
 pub fn delegate(
     delegator_sk: &SecretKey,
-    threshold: u32,
-    num_shares: u32,
+    threshold: usize,
+    num_shares: usize,
     proxy_pks: &[&PublicKey],
 ) -> Result<Delegation, DelegationError> {
     delegate_with_rng(&mut OsRng, delegator_sk, threshold, num_shares, proxy_pks)
@@ -444,8 +448,8 @@ mod tests {
         Alice, re-encryption by Ursula, and decryption by Bob.
         */
 
-        let threshold: u32 = 2;
-        let num: u32 = threshold + 1;
+        let threshold: usize = 2;
+        let num_shares: usize = threshold + 1;
 
         // Key Generation (Alice)
         let delegator_sk = SecretKey::random();
@@ -459,7 +463,9 @@ mod tests {
         let reader_pk = reader_sk.public_key();
 
         // Key Generation (Proxies)
-        let proxy_sks: Vec<_> = (0..num as usize).map(|_| SecretKey::random()).collect();
+        let proxy_sks: Vec<_> = (0..num_shares as usize)
+            .map(|_| SecretKey::random())
+            .collect();
         let proxy_pks: Vec<_> = proxy_sks.iter().map(|sk| sk.public_key()).collect();
         let proxy_pks_ref: Vec<_> = proxy_pks.iter().map(|pk| pk).collect();
 
@@ -482,12 +488,15 @@ mod tests {
         // Recipient verifies signature to confirm the data origin
         assert!(sig_back.verify_with_aux(&signer_pk, &capsule_bytes, &cipher_digest));
 
+        // Verify capsule
+        assert!(capsule.verify());
+
         // Decryption by Alice
         let plaintext_alice = decrypt(&delegator_sk, &capsule, &ciphertext).unwrap();
         assert_eq!(&plaintext_alice as &[u8], plaintext);
 
         // Split Re-Encryption Key Generation (aka Delegation)
-        let delegation = delegate(&delegator_sk, threshold, num, &proxy_pks_ref).unwrap();
+        let delegation = delegate(&delegator_sk, threshold, num_shares, &proxy_pks_ref).unwrap();
 
         // Alice signs delegation -- this can be optional, for example, when delegation is sent onchain which already has a signature in transaction
         let delegation_bytes = delegation.to_bytes();
@@ -503,7 +512,9 @@ mod tests {
         assert!(deleg_sig_back.verify(&signer_pk, &delegation_bytes));
 
         // Verify public parameters in delegation
-        delegation_back.verify_public().unwrap();
+        delegation_back
+            .verify_public(threshold, num_shares)
+            .unwrap();
 
         // Each proxy decrypts its own encrypted_kfrag to obtain kfrag and verifies kfrag
         let verified_kfrags: Vec<_> = delegation_back
